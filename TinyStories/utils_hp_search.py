@@ -2,16 +2,17 @@ import torch
 import sys
 import numpy as np
 import inspect
-sys.path.append('../')  
+import math
+import time
 from Classes.myGPT import Model  
 from torch.utils.tensorboard import SummaryWriter
-import time
+sys.path.append('../')  
 
 class Trainer:
     def __init__(self, vocab_size, block_size, 
                  dropout, n_layers, d_model, n_heads,
                 device, learning_rate, batch_size,
-                epochs, eval_iters):
+                steps, eval_iters):
         
         self.vocab_size = vocab_size
         self.block_size = block_size
@@ -21,10 +22,13 @@ class Trainer:
         self.d_model = d_model
         self.n_heads = n_heads
         self.device = device
-        self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.epochs = epochs
+        self.steps = steps
         self.eval_iters = eval_iters
+        self.max_lr = learning_rate
+        self.min_lr = self.max_lr * 0.1
+        self.warmup_steps = 715
+        self.max_steps = 56400 # 56400 steps is ~1 step, if data is 10B tokens and batch size 0.5M tokens
 
         self.m = Model(vocab_size=self.vocab_size, block_size=self.block_size,
                        dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
@@ -93,42 +97,58 @@ class Trainer:
         self.m.train()
 
         return out
+    
+    def get_lr(self, it):
+        # 1) linear warmup for warmup_iters steps
+        if it < self.warmup_steps:
+            return self.max_lr * (it+1) / self.warmup_steps
+        # 2) if it > lr_decay_iters, return min learning rate
+        if it > self.max_steps:
+            return self.min_lr
+        # 3) in between, use cosine decay down to min learning rate
+        decay_ratio = (it - self.warmup_steps) / (self.max_steps - self.warmup_steps)
+        assert 0 <= decay_ratio <= 1
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
+        return self.min_lr + coeff * (self.max_lr - self.min_lr)
 
     def train_model(self):
         writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
-        # writer = SummaryWriter(f'runs/dropout_{self.dropout}_block_size_{self.block_size}_learning_rate_{self.learning_rate}')                
-        # optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.learning_rate)
+        # writer = SummaryWriter(f'runs/dropout_{self.dropout}_block_size_{self.block_size}self.max_lr{self.self.max_lr}')                
+        # optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.self.max_lr)
 
         optimizer = self.configure_optimizers(weight_decay=0.1, 
-                                                learning_rate=self.learning_rate, 
+                                                learning_rate=6e-4, 
                                                 device_type=self.device)
         
         n_params = sum(p.nelement() for p in self.m.parameters())
         print(f'Number of parameters: {n_params:,}')
 
-        for epoch in range(self.epochs):
+        for step in range(self.steps):
             
             start_time = time.time()
             Xb, Yb = self.make_batches(split='train')            
             logits, loss = self.m(Xb, Yb) # B, C
-            writer.add_scalar('Loss/train', loss, epoch)
+            writer.add_scalar('Loss/train', loss, step)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            lr = self.get_lr(step)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
             optimizer.step()
             end_time = time.time()
             dt = (end_time - start_time)
             n_tokens = self.batch_size * self.block_size
 
-            print(f"Epoch: {epoch+1}. Loss: {loss:.3f}. {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec")
+            print(f"Step: {step+1}. Loss: {loss:.3f}. {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec")
 
-            if epoch % 100 == 99:
+            if step % 100 == 99:
                 l = self.estimate_loss()
-                writer.add_scalar('Loss/val', l['val'], epoch)
-                #writer.add_scalar('Loss/train', l['train'], epoch)
+                writer.add_scalar('Loss/val', l['val'], step)
+                #writer.add_scalar('Loss/train', l['train'], step)
 
-            if epoch % 250 == 249:
-                print(f'Epoch: {epoch+1}. Loss: {l["train"]:.3f}. Loss: {l["val"]:.2f}')
+            if step % 250 == 249:
+                print(f'step: {step+1}. Loss: {l["train"]:.3f}. Loss: {l["val"]:.2f}')
                
 
 # logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
@@ -183,8 +203,8 @@ class Trainer:
 
 # def train_model(vocab_size, block_size, dropout,
 #                 dff, n_layers, d_model, n_heads,
-#                 device, learning_rate, batch_size,
-#                 epochs, self.eval_iters):
+#                 device, self.max_lr, batch_size,
+#                 steps, self.eval_iters):
 
 #     writer = SummaryWriter(f'runs/heads_{n_heads}_layers_{n_layers}_dmodel_{d_model}')
 
@@ -192,11 +212,11 @@ class Trainer:
 #                       dropout=dropout, dff=dff, n_layers=n_layers,
 #                       d_model=d_model, n_heads=n_heads).to(device)
     
-#     optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
+#     optimizer = torch.optim.AdamW(m.parameters(), lr=self.max_lr)
 #     n_params = sum(p.nelement() for p in m.parameters())
 #     print(f'Number of parameters: {n_params:,}')
 
-#     for epoch in range(epochs):
+#     for step in range(steps):
 
 #         Xb, Yb = make_batches(split='train',
 #                               batch_size=batch_size,
@@ -211,7 +231,7 @@ class Trainer:
 #         loss.backward()
 #         optimizer.step()
 
-#         if epoch % 10 == 9:
+#         if step % 10 == 9:
 #             l = self.estimate_loss(m=m,
 #                               self.eval_iters=self.eval_iters,
 #                               block_size=block_size,
@@ -220,8 +240,8 @@ class Trainer:
 #                               val=val,
 #                               device=device)
             
-#             writer.add_scalar('Loss/val', l['val'], epoch)
-#             writer.add_scalar('Loss/train', l['train'], epoch)
+#             writer.add_scalar('Loss/val', l['val'], step)
+#             writer.add_scalar('Loss/train', l['train'], step)
 
 #         final_metrics = self.estimate_loss(  m=m,     
 #                                         self.eval_iters=self.eval_iters,
@@ -233,4 +253,4 @@ class Trainer:
         
 #     hparams = {'d_model': d_model, 'n_heads': n_heads, 'n_layers': n_layers}
 #     writer.add_hparams(hparams, {'Loss/val': final_metrics['val']})
-#         # print(f"Iteration {epoch}. Training Loss: {l['train']:.3f}. Evaluation Loss: {l['val']:.3f}")
+#         # print(f"Iteration {step}. Training Loss: {l['train']:.3f}. Evaluation Loss: {l['val']:.3f}")

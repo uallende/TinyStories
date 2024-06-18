@@ -1,6 +1,7 @@
 import torch
 import os
 import TinyStories.utils_hp_search as ut
+import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -15,16 +16,34 @@ n_heads = 8
 n_layers = 8
 d_model = 768
 dropout = 0.1
-learning_rate = 3e-4
+
 epochs = 8192
 eval_iters = 10
+
+max_lr = 6e-4
+min_lr = max_lr * 0.1
+warmup_steps = 715
+max_steps = 56400 # 56400 steps is ~1 epoch, if data is 10B tokens and batch size 0.5M tokens
+
+def get_lr(it):
+    # 1) linear warmup for warmup_iters steps
+    if it < warmup_steps:
+        return max_lr * (it+1) / warmup_steps
+    # 2) if it > lr_decay_iters, return min learning rate
+    if it > max_steps:
+        return min_lr
+    # 3) in between, use cosine decay down to min learning rate
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
+    return min_lr + coeff * (max_lr - min_lr)
 
 vocab_size = 15_000 # next power of two doesn't increase performance
 
 trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
                      n_layers=n_layers, d_model=d_model, n_heads=n_heads,
-                     device=device, learning_rate=learning_rate, 
-                     batch_size=batch_size, epochs=50, eval_iters=2)
+                     device=device, learning_rate=max_lr, 
+                     batch_size=batch_size, steps=50, eval_iters=2)
 
 trainer.load_data('data/tokenized_inputs/tns_chunk_0.pt', 'data/tokenized_inputs/val.pt')
 x, y = trainer.make_batches('train')
