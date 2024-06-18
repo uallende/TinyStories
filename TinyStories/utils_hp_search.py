@@ -1,22 +1,22 @@
 import torch
 import sys
 import numpy as np
+import inspect
 sys.path.append('../')  
 from Classes.myGPT import Model  
 from torch.utils.tensorboard import SummaryWriter
 import time
 
-
 class Trainer:
     def __init__(self, vocab_size, block_size, 
-                 dropout, dff, n_layers, d_model, n_heads,
+                 dropout, n_layers, d_model, n_heads,
                 device, learning_rate, batch_size,
                 epochs, eval_iters):
         
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.dropout = dropout
-        self.dff = dff
+        self.dff = d_model * 3
         self.n_layers = n_layers
         self.d_model = d_model
         self.n_heads = n_heads
@@ -30,17 +30,8 @@ class Trainer:
                        dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
                        d_model=self.d_model, n_heads=self.n_heads).to(self.device)
         
-    def set_params(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-        self.dff = self.d_model * 4  # Assuming dff is always 4 * d_model
-        self.reinitialize_model()
-    
-    def reinitialize_model(self):
-        self.m = Model(vocab_size=self.vocab_size, block_size=self.block_size,
-                       dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
-                       d_model=self.d_model, n_heads=self.n_heads).to(self.device)
-
+        # self.m = torch.compile(self.m, mode="reduce-overhead")
+        
     def load_data(self, train, val):
         self.train = self._convert_to_tensor(train)
         self.val = self._convert_to_tensor(val)
@@ -62,8 +53,32 @@ class Trainer:
         x = torch.stack([data[i:i+self.block_size] for i in ix])
         y = torch.stack([data[i+1:i+1+self.block_size] for i in ix])
         x, y = x.to(self.device), y.to(self.device)
-
         return x, y
+    
+    def configure_optimizers(self, weight_decay, learning_rate, device_type):
+
+        param_dict = {pn: p for pn, p in self.m.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+
+        decay_params = [p for n, p in param_dict.items() if p.dim() >=2]
+        no_decay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+
+        optim_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": no_decay_params, "weight_decay": 0.0},
+        ]
+
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_no_decay_params = sum(p.numel() for p in no_decay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(no_decay_params)}, with {num_no_decay_params:,} parameters")
+
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == "cuda"
+        print(f"using fused AdamW: {use_fused}")
+
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
 
     def estimate_loss(self):
         out = {}
@@ -82,7 +97,12 @@ class Trainer:
     def train_model(self):
         writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
         # writer = SummaryWriter(f'runs/dropout_{self.dropout}_block_size_{self.block_size}_learning_rate_{self.learning_rate}')                
-        optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.learning_rate)
+        # optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.learning_rate)
+
+        optimizer = self.configure_optimizers(weight_decay=0.1, 
+                                                learning_rate=self.learning_rate, 
+                                                device_type=self.device)
+        
         n_params = sum(p.nelement() for p in self.m.parameters())
         print(f'Number of parameters: {n_params:,}')
 
@@ -97,10 +117,10 @@ class Trainer:
             loss.backward()
             optimizer.step()
             end_time = time.time()
-            total_time = (end_time - start_time) * 1000
+            dt = (end_time - start_time)
             n_tokens = self.batch_size * self.block_size
 
-            print(f"Epoch: {epoch+1}. Loss: {loss:.3f}. {total_time:.3f} ms. {n_tokens/total_time:.3f} tok/sec")
+            print(f"Epoch: {epoch+1}. Loss: {loss:.3f}. {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec")
 
             if epoch % 100 == 99:
                 l = self.estimate_loss()
@@ -108,7 +128,7 @@ class Trainer:
                 #writer.add_scalar('Loss/train', l['train'], epoch)
 
             if epoch % 250 == 249:
-                print(f'Epoch: {epoch+1}. Loss: {l["train"]:.3f}. Loss: {l["val"]:.3f}')
+                print(f'Epoch: {epoch+1}. Loss: {l["train"]:.3f}. Loss: {l["val"]:.2f}')
                
 
 # logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')

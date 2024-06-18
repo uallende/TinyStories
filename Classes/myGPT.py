@@ -1,19 +1,19 @@
 import torch
-from torch.nn import functional as F
 from torch import nn
+from torch.nn import functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if device.type == 'cuda':
-    torch.backends.cudnn.benchmark = True
+torch.set_float32_matmul_precision('high')
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, n_heads, d_model, block_size, dropout=0.1):
+    def __init__(self, n_heads, d_model, block_size, dropout):
 
         super().__init__()
         assert d_model % n_heads == 0, "Embedding dimension must be 0 modulo number of heads."
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = dropout
+        self.dropout_l = nn.Dropout(self.dropout)
         self.d_model = d_model
         self.n_heads = n_heads
         self.query = nn.Linear(d_model, d_model, bias=False)
@@ -28,7 +28,7 @@ class MultiHeadAttention(nn.Module):
         k = x
         v = x
         #print("Shape of x inside model:", x.shape)
-        B,T,_ = x.shape 
+        B,T,C = x.size() 
 
         dk = self.d_model // self.n_heads
 
@@ -47,12 +47,13 @@ class MultiHeadAttention(nn.Module):
         x = x * dk ** -0.5 # B,h,T,T
         x = x.masked_fill(self.mask, float('-inf')) # B,h,T,T
         x = F.softmax(x, dim=(-1)) # B,n_h,T,T 
-        
         x = x @ v  # B,h,T,T @ B,T,h,dv --> B,h,T,dv
-        B,h,T,dv = x.shape
-        x = x.transpose(2,1).contiguous().view(B,T,h*dv) #B,T,C
-        out = self.att_proj(x) # B,T,C
 
+        # flash attention doesn't improve performance
+        # x = F.scaled_dot_product_attention(q, k, v, is_causal=True) 
+
+        x = x.transpose(2,1).contiguous().view(B,T,C) #B,T,C
+        out = self.att_proj(x) # B,T,C
         return out
     
 class AttentionLayer(nn.Module):
@@ -63,7 +64,7 @@ class AttentionLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        x = self.att(x)
+        x = self.dropout(self.att(x))
         return x
     
 class FeedForward(nn.Module):
@@ -72,7 +73,7 @@ class FeedForward(nn.Module):
 
         self.seq = nn.Sequential(
                     nn.Linear(d_model, dff),
-                    nn.ReLU(),
+                    nn.SiLU(),
                     nn.Dropout(dropout),
                     nn.Linear(dff, d_model)
                     )
@@ -114,6 +115,7 @@ class Model(nn.Module):
         self.embedding_table = nn.Embedding(vocab_size, d_model)
         self.pos_embedding = nn.Embedding(block_size, d_model)
 
+
         self.decoder = nn.Sequential(*[DecoderLayer(n_heads,
                                                     d_model,
                                                     block_size,
@@ -121,12 +123,13 @@ class Model(nn.Module):
                                                     dff) 
                                                     for _ in range(n_layers)])
         
-        self.out = nn.Linear(d_model, vocab_size)
+        self.out = nn.Linear(d_model, vocab_size, bias=False)
+
+        # weight sharing scheme
+        self.embedding_table.weight = self.out.weight
 
     def forward(self, x, targets=None):
-        #print(x.shape)
         embeds = self.embedding_table(x)
-        # print(f'Device: {device}. block_size: {self.block_size}')
         positions = self.pos_embedding(torch.arange(self.block_size, device=device))
         x = embeds + positions
         x = self.decoder(x)
@@ -139,7 +142,6 @@ class Model(nn.Module):
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
-            #print(logits.shape, targets.shape)
             loss = F.cross_entropy(input=logits, target=targets)
 
         return logits, loss    

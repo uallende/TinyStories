@@ -1,6 +1,5 @@
 import torch
 import os
-import Classes.myGPT
 import TinyStories.utils_hp_search as ut
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -8,22 +7,23 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def calculate_total_batches(data, block_size, batch_size):
     return len(data) // (block_size * batch_size)
 
-block_size = 16
+block_size = 512
 batch_size = 16
 run_count = 0
 batch_size_values = [40]
-n_heads = 2
-n_layers = 2
+n_heads = 8
+n_layers = 8
 d_model = 768
-dropout = 0.2
+dropout = 0.1
 learning_rate = 3e-4
-epochs = 15_000
+epochs = 8192
 eval_iters = 10
-vocab_size = 15_000
+
+vocab_size = 15_000 # next power of two doesn't increase performance
 
 trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
                      n_layers=n_layers, d_model=d_model, n_heads=n_heads,
-                     device=device, learning_rate=learning_rate, dff=d_model*4,
+                     device=device, learning_rate=learning_rate, 
                      batch_size=batch_size, epochs=50, eval_iters=2)
 
 trainer.load_data('data/tokenized_inputs/tns_chunk_0.pt', 'data/tokenized_inputs/val.pt')
