@@ -8,8 +8,23 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def calculate_total_batches(data, block_size, batch_size):
     return len(data) // (block_size * batch_size)
 
-trainer = ut.Trainer(vocab_size=100, block_size=10, dropout=0.1, dff=100, n_layers=1, d_model=100, n_heads=1,
-                     device=device, learning_rate=0.001, batch_size=32, epochs=10, eval_iters=100)
+block_size = 16
+batch_size = 16
+run_count = 0
+batch_size_values = [40]
+n_heads = 2
+n_layers = 2
+d_model = 768
+dropout = 0.2
+learning_rate = 3e-4
+epochs = 15_000
+eval_iters = 10
+vocab_size = 15_000
+
+trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
+                     n_layers=n_layers, d_model=d_model, n_heads=n_heads,
+                     device=device, learning_rate=learning_rate, dff=d_model*4,
+                     batch_size=batch_size, epochs=50, eval_iters=2)
 
 trainer.load_data('data/tokenized_inputs/tns_chunk_0.pt', 'data/tokenized_inputs/val.pt')
 x, y = trainer.make_batches('train')
@@ -21,31 +36,35 @@ files = os.listdir(data_dir)
 steps = 1
 for file in files:
     if file.startswith('tns'):
-        train = torch.load(data_dir + file)
-        total_batches = calculate_total_batches(train, block_size, batch_size)
-        train_dl = make_batches(train, block_size, batch_size)
+        trainer.load_data(f'{data_dir}/{file}', 'data/tokenized_inputs/val.pt')
+        total_batches = calculate_total_batches(trainer.train, block_size, batch_size)
+        x, y = trainer.make_batches(split='train')
 
-        for epoch, (Xb, Yb) in enumerate(tqdm(train_dl, total=total_batches)):
+        # print(x[:15], y[:15])
+        trainer.train_model()
+        # for epoch, (Xb, Yb) in enumerate(tqdm(train_dl, total=total_batches)):
 
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = get_lr(steps)
+        #     for param_group in optimizer.param_groups:
+        #         param_group['lr'] = get_lr(steps)
 
-            Xb, Yb = Xb.to(device), Yb.to(device)
-            logits, loss = m(Xb, Yb)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
-            writer.add_scalar('Loss/train', loss, steps)
-            steps += 1
+        #     Xb, Yb = Xb.to(device), Yb.to(device)
+        #     logits, loss = m(Xb, Yb)
+        #     optimizer.zero_grad(set_to_none=True)
+        #     loss.backward()
+        #     optimizer.step()
+        #     writer.add_scalar('Loss/train', loss, steps)
+        #     steps += 1
 
-            if (epoch+1) % 100 == 0:
-                _, val_loss = estimate_loss(m, train, val, block_size, batch_size, eval_iters)
-                writer.add_scalar('Loss/val', val_loss, steps)
+        #     if (epoch+1) % 100 == 0:
+        #         _, val_loss = estimate_loss(m, train, val, block_size, batch_size, eval_iters)
+        #         writer.add_scalar('Loss/val', val_loss, steps)
 
-        train_loss, val_loss = estimate_loss(m, train, val, block_size, batch_size, eval_iters)
+        # train_loss, val_loss = estimate_loss(m, train, val, block_size, batch_size, eval_iters)
 
-        if steps >= max_iters:
-            break
+        # if steps >= max_iters:
+        break
+
+import sys; sys.exit()
 
 # save torch model
 torch.save(m.state_dict())

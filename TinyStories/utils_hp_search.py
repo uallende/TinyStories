@@ -4,6 +4,8 @@ import numpy as np
 sys.path.append('../')  
 from Classes.myGPT import Model  
 from torch.utils.tensorboard import SummaryWriter
+import time
+
 
 class Trainer:
     def __init__(self, vocab_size, block_size, 
@@ -85,7 +87,8 @@ class Trainer:
         print(f'Number of parameters: {n_params:,}')
 
         for epoch in range(self.epochs):
-
+            
+            start_time = time.time()
             Xb, Yb = self.make_batches(split='train')            
             logits, loss = self.m(Xb, Yb) # B, C
             writer.add_scalar('Loss/train', loss, epoch)
@@ -93,6 +96,11 @@ class Trainer:
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
+            end_time = time.time()
+            total_time = (end_time - start_time) * 1000
+            n_tokens = self.batch_size * self.block_size
+
+            print(f"Epoch: {epoch+1}. Loss: {loss:.3f}. {total_time:.3f} ms. {n_tokens/total_time:.3f} tok/sec")
 
             if epoch % 100 == 99:
                 l = self.estimate_loss()

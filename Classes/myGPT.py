@@ -47,6 +47,7 @@ class MultiHeadAttention(nn.Module):
         x = x * dk ** -0.5 # B,h,T,T
         x = x.masked_fill(self.mask, float('-inf')) # B,h,T,T
         x = F.softmax(x, dim=(-1)) # B,n_h,T,T 
+        
         x = x @ v  # B,h,T,T @ B,T,h,dv --> B,h,T,dv
         B,h,T,dv = x.shape
         x = x.transpose(2,1).contiguous().view(B,T,h*dv) #B,T,C
@@ -123,9 +124,9 @@ class Model(nn.Module):
         self.out = nn.Linear(d_model, vocab_size)
 
     def forward(self, x, targets=None):
-
         #print(x.shape)
         embeds = self.embedding_table(x)
+        # print(f'Device: {device}. block_size: {self.block_size}')
         positions = self.pos_embedding(torch.arange(self.block_size, device=device))
         x = embeds + positions
         x = self.decoder(x)
