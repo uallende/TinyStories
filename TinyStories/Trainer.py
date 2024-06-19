@@ -85,6 +85,7 @@ class Trainer:
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
         return optimizer
 
+    @torch.no_grad()
     def estimate_loss(self):
         out = {}
         self.m.eval()
@@ -142,15 +143,16 @@ class Trainer:
             end_time = time.time()
             dt = (end_time - start_time)
             n_tokens = self.batch_size * self.block_size
-
-            if step % 100 == 99:
+            print(f"Step: {step+1}. time {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
+            
+            if step % 20 == 19:
                 l = self.estimate_loss()
                 writer.add_scalar('Loss/val', l['val'], step)
                 print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}. "
                       f"{dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
                 
 
-            if step > 0 and (step % 100 == 0 or last_step):
+            if step > 0 and (step % 5000 == 0 or last_step):
                 checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
                 checkpoint = {
                     'model': self.m.state_dict(),
@@ -159,7 +161,6 @@ class Trainer:
                     'opt': optimizer.state_dict(),
                     'val_loss': l['val']
                 }
-                print(f"Config {self.save_config()}")
                 torch.save(checkpoint, checkpoint_path)
         
                         
