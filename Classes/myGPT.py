@@ -6,7 +6,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_float32_matmul_precision('high')
 
 class MultiHeadAttention(nn.Module):
-
     def __init__(self, n_heads, d_model, block_size, dropout):
 
         super().__init__()
@@ -23,7 +22,6 @@ class MultiHeadAttention(nn.Module):
         self.register_buffer('mask', torch.triu(torch.ones(block_size, block_size).bool(), diagonal=1))
 
     def forward(self, x):
-
         q = x
         k = x
         v = x
@@ -59,7 +57,6 @@ class MultiHeadAttention(nn.Module):
 class AttentionLayer(nn.Module):
     def __init__(self, n_heads, d_model, block_size, dropout):
         super().__init__()
-
         self.att = MultiHeadAttention(n_heads, d_model, block_size, dropout)
         self.dropout = nn.Dropout(dropout)
 
@@ -124,8 +121,7 @@ class Model(nn.Module):
                                                     for _ in range(n_layers)])
         
         self.out = nn.Linear(d_model, vocab_size, bias=False)
-
-        # weight sharing scheme
+        # tied embeddings
         self.embedding_table.weight = self.out.weight
 
     def forward(self, x, targets=None):

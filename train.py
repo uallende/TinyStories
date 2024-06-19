@@ -1,6 +1,6 @@
 import torch
 import os
-import TinyStories.utils_hp_search as ut
+import TinyStories.Trainer as ut
 import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -9,11 +9,11 @@ def calculate_total_batches(data, block_size, batch_size):
     return len(data) // (block_size * batch_size)
 
 block_size = 512
-batch_size = 16
+batch_size = 8
 run_count = 0
 batch_size_values = [40]
-n_heads = 8
-n_layers = 8
+n_heads = 4
+n_layers = 4
 d_model = 768
 dropout = 0.1
 
@@ -43,7 +43,7 @@ vocab_size = 15_000 # next power of two doesn't increase performance
 trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
                      n_layers=n_layers, d_model=d_model, n_heads=n_heads,
                      device=device, learning_rate=max_lr, 
-                     batch_size=batch_size, steps=50, eval_iters=2)
+                     batch_size=batch_size, steps=150, eval_iters=2)
 
 trainer.load_data('data/tokenized_inputs/tns_chunk_0.pt', 'data/tokenized_inputs/val.pt')
 x, y = trainer.make_batches('train')

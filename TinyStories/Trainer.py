@@ -1,9 +1,5 @@
-import torch
-import sys
+import torch, math, time, os, sys, inspect
 import numpy as np
-import inspect
-import math
-import time
 from Classes.myGPT import Model  
 from torch.utils.tensorboard import SummaryWriter
 sys.path.append('../')  
@@ -39,6 +35,11 @@ class Trainer:
     def load_data(self, train, val):
         self.train = self._convert_to_tensor(train)
         self.val = self._convert_to_tensor(val)
+
+    def save_config(self):
+        # Filter __dict__ if necessary to remove non-config attributes
+        config_dict = {k: v for k, v in self.__dict__.items() if not k.startswith('_') and k != 'm'}
+        return config_dict
 
     def _convert_to_tensor(self, data):
         if isinstance(data, torch.Tensor):
@@ -95,7 +96,6 @@ class Trainer:
                 losses[k] = loss.item()
             out[split] = losses.mean()
         self.m.train()
-
         return out
     
     def get_lr(self, it):
@@ -113,25 +113,28 @@ class Trainer:
 
     def train_model(self):
         writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
+        log_dir = "model_checkpoints"
         # writer = SummaryWriter(f'runs/dropout_{self.dropout}_block_size_{self.block_size}self.max_lr{self.self.max_lr}')                
         # optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.self.max_lr)
 
-        optimizer = self.configure_optimizers(weight_decay=0.1, 
-                                                learning_rate=6e-4, 
-                                                device_type=self.device)
-        
         n_params = sum(p.nelement() for p in self.m.parameters())
         print(f'Number of parameters: {n_params:,}')
+        print(f'Tokens per batch: {self.block_size*self.batch_size}')
+        optimizer = self.configure_optimizers(weight_decay=0.1, 
+                                              learning_rate=6e-4, 
+                                              device_type=self.device)
+        
 
         for step in range(self.steps):
-            
             start_time = time.time()
+            last_step = (step == self.steps - 1)
             Xb, Yb = self.make_batches(split='train')            
             logits, loss = self.m(Xb, Yb) # B, C
             writer.add_scalar('Loss/train', loss, step)
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)
             lr = self.get_lr(step)
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
@@ -140,16 +143,26 @@ class Trainer:
             dt = (end_time - start_time)
             n_tokens = self.batch_size * self.block_size
 
-            print(f"Step: {step+1}. Loss: {loss:.3f}. {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec")
-
             if step % 100 == 99:
                 l = self.estimate_loss()
                 writer.add_scalar('Loss/val', l['val'], step)
-                #writer.add_scalar('Loss/train', l['train'], step)
+                print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}. "
+                      f"{dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
+                
 
-            if step % 250 == 249:
-                print(f'step: {step+1}. Loss: {l["train"]:.3f}. Loss: {l["val"]:.2f}')
-               
+            if step > 0 and (step % 100 == 0 or last_step):
+                checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                checkpoint = {
+                    'model': self.m.state_dict(),
+                    'config': self.save_config(),
+                    'step': step,
+                    'opt': optimizer.state_dict(),
+                    'val_loss': l['val']
+                }
+                print(f"Config {self.save_config()}")
+                torch.save(checkpoint, checkpoint_path)
+        
+                        
 
 # logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 # train = torch.load('train.pt')

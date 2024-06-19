@@ -1,3 +1,4 @@
 data/
 TinyStories/training runs
 runs/
+model_checkpoints/
