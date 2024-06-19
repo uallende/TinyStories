@@ -1,23 +1,27 @@
 import torch
 import os
-import sys
-from typing import List
-sys.path.append('../') 
- 
+import sys; sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from typing import List 
 from Classes.tokenizer import Tokenizer as T
-tokenizer = T()
 
-# Define paths
-train_file_path = './data/tinystoriesv2-gpt4-train.txt'
-valid_file_path = './data/tinystoriesv2-gpt4-valid.txt'
-output_train_dir = './data/tokenized_inputs/'
+tokenizer = T()
+train_file_name = 'data/TinyStoriesV2-GPT4-train.txt'
+valid_file_name = 'data/TinyStoriesV2-GPT4-valid.txt'
+
+project_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+train_file_path = os.path.join(project_folder, train_file_name)
+valid_file_path = os.path.join(project_folder, valid_file_name)
+output_train_dir = 'data/tokenized_inputs/'
 
 # Create output directory for training set if it doesn't exist
 if not os.path.exists(output_train_dir):
     os.makedirs(output_train_dir)
 
+# exit(0)
+
 # Parameters for chunking
-chunk_size = 1024 * 1024 * 20 # 1MB, adjust as needed
+chunk_size = 1024 * 1024 * 20 * 10 # 10MB, adjust as needed
 buffer_size = 1024  # To ensure we don't cut words
 
 def tokenize_and_save(text: str, output_path: str):
