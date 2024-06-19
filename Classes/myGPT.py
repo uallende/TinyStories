@@ -40,15 +40,15 @@ class MultiHeadAttention(nn.Module):
         k = k.view(B,T,self.n_heads,dk).permute(0,2,1,3)  
         v = v.view(B,T,self.n_heads,dk).permute(0,2,1,3)  
         
-        # attention 
-        x = q @ k.transpose(-2,-1) # B,h,T,dk @ B,h,dk,T --> B,h,T,T
-        x = x * dk ** -0.5 # B,h,T,T
-        x = x.masked_fill(self.mask, float('-inf')) # B,h,T,T
-        x = F.softmax(x, dim=(-1)) # B,n_h,T,T 
-        x = x @ v  # B,h,T,T @ B,T,h,dv --> B,h,T,dv
+        # # attention 
+        # x = q @ k.transpose(-2,-1) # B,h,T,dk @ B,h,dk,T --> B,h,T,T
+        # x = x * dk ** -0.5 # B,h,T,T
+        # x = x.masked_fill(self.mask, float('-inf')) # B,h,T,T
+        # x = F.softmax(x, dim=(-1)) # B,n_h,T,T 
+        # x = x @ v  # B,h,T,T @ B,T,h,dv --> B,h,T,dv
 
         # flash attention doesn't improve performance
-        # x = F.scaled_dot_product_attention(q, k, v, is_causal=True) 
+        x = F.scaled_dot_product_attention(q, k, v, is_causal=True) 
 
         x = x.transpose(2,1).contiguous().view(B,T,C) #B,T,C
         out = self.att_proj(x) # B,T,C
