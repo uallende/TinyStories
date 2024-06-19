@@ -5,7 +5,7 @@ import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-block_size = 256+32
+block_size = 256 
 batch_size = 32
 run_count = 0
 batch_size_values = [40]

@@ -92,10 +92,8 @@ class DecoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-
         x = x + self.att(self.lnorm1(x))
         x = x + self.ffw(self.lnorm2(x))
-
         return x
     
 class Model(nn.Module):
