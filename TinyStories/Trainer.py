@@ -23,15 +23,15 @@ class Trainer:
         self.eval_iters = eval_iters
         self.max_lr = learning_rate
         self.min_lr = self.max_lr * 0.1
-        self.warmup_steps = 715
-        self.max_steps = 56400 # 56400 steps is ~1 step, if data is 10B tokens and batch size 0.5M tokens
+        self.warmup_steps = 500
+        self.max_steps = self.steps # 56400 steps is ~1 step, if data is 10B tokens and batch size 0.5M tokens
 
         self.m = Model(vocab_size=self.vocab_size, block_size=self.block_size,
                        dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
                        d_model=self.d_model, n_heads=self.n_heads).to(self.device)
         
-        # self.m = torch.compile(self.m, mode="reduce-overhead")
-        
+        self.m = torch.compile(self.m)
+                
     def load_data(self, train, val):
         self.train = self._convert_to_tensor(train)
         self.val = self._convert_to_tensor(val)
@@ -145,7 +145,7 @@ class Trainer:
             n_tokens = self.batch_size * self.block_size
             print(f"Step: {step+1}. time {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
             
-            if step % 20 == 19:
+            if step % 10 == 9:
                 l = self.estimate_loss()
                 writer.add_scalar('Loss/val', l['val'], step)
                 print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}. "
