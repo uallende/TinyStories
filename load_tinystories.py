@@ -9,13 +9,13 @@ local_dir = "data/tokenized_inputs"
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 shard_size = int(1e8)
-tfw = open("data/TinyStoriesV2-GPT4-train.txt", "r")
-vfw = open("data/TinyStoriesV2-GPT4-valid.txt", "r")
+tfw = open("data/train.csv", "r")
+vfw = open("data/valid.csv", "r")
 
 def tokenize(doc):
     # tokenizes a single document and returns a numpy array of uint16 tokens
     tokenizer = T()
-    tokens: List[int] = tokenizer.encode(s=doc, bos=False, eos=False)
+    tokens: List[int] = tokenizer.encode(s=doc, bos=True, eos=False)
     tokens_np = np.array(tokens, dtype=np.int16)  # Use numpy.int16 instead of torch.long
     assert (0 <= tokens_np).all() and (tokens_np < 2**14).all(), "token dictionary too large for uint16"
     tokens_np_uint16 = tokens_np.astype(np.uint16)
@@ -26,7 +26,7 @@ def write_datafile(filename, tokens_np):
 
 def process_file(file, split):
     # tokenize all documents and write output shards, each of shard_size tokens (last shard has remainder)
-    nprocs = max(1, os.cpu_count() // 2)
+    nprocs = max(1, os.cpu_count() - 1)
     with mp.Pool(nprocs) as pool:
         shard_index = 0
         # preallocate buffer to hold current shard
