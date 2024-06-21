@@ -3,3 +3,4 @@
  - Look at improving tokenizer
  - move make batches out of training loop - Done
  - print toks/s, time, lr, norm - Done
+ - print generated text - Done

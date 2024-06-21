@@ -2,7 +2,13 @@ import torch, math, time, os, sys, inspect
 import numpy as np
 from Classes.myGPT import Model  
 from torch.utils.tensorboard import SummaryWriter
+from typing import List
+
 sys.path.append('../')  
+
+from Classes.tokenizer import Tokenizer as T
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Trainer:
     def __init__(self, vocab_size, block_size, 
@@ -25,15 +31,23 @@ class Trainer:
         self.min_lr = self.max_lr * 0.1
         self.warmup_steps = 1000
         self.max_steps = self.steps 
+        self.tkrz = T()
+        self.gen_starting_text = "Once upon a time"
+        self.gen_toks = self.tokenizer(self.gen_starting_text).unsqueeze(0).to(device)
 
         self.m = Model(vocab_size=self.vocab_size, block_size=self.block_size,
                        dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
                        d_model=self.d_model, n_heads=self.n_heads).to(self.device)
         
         # self.m = torch.compile(self.m) not available 1060
+
+    def tokenizer(self, doc):
+        tokens: List[int] = self.tkrz.encode(s=doc, bos=True, eos=False)
+        tokens_ts = torch.tensor(tokens, dtype=torch.long)  #
+        assert (0 <= tokens_ts).all() and (tokens_ts < 2**14).all(), "token dictionary too large for uint16"
+        return tokens_ts
                 
     def load_data(self, train, val):
-        print(train, val)
         self.train = self._convert_to_tensor(train)
         self.val = self._convert_to_tensor(val)
 
@@ -186,7 +200,7 @@ class Trainer:
         grad_accum_steps = 8
         global_step = 0
 
-        for step in range(self.steps):
+        for step in range(self.steps//grad_accum_steps):
             optimizer.zero_grad(set_to_none=True)
             loss_accum = 0.0
             st = time.time()
@@ -226,13 +240,19 @@ class Trainer:
             et = time.time()
             dt = (et - st)
             n_tokens = self.batch_size * self.block_size * grad_accum_steps  # Adjust for accumulated steps
-            print(f"Step: {step+1}. No toks: {n_tokens}. time {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
+            print(f"step: {step+1}. time {dt*1000:.3f} ms. "
+                  f"{n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. "
+                  f"train loss: {loss_accum:.3f}. norm: {norm:.2f}")
 
             # Evaluation and checkpoint saving
-            if step % 500 == 49:
+            if step % 100 == 99:
                 l = self.estimate_loss()
                 writer.add_scalar('Loss/val', l['val'], step)
                 print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}")
+
+                generated_idx = self.m.generate(self.gen_toks, max_new_tokens=30)
+                generated_text = self.tkrz.decode(generated_idx[0].tolist())
+                print(f"Generated text: {self.gen_starting_text} {generated_text}")
 
             if step > 0 and (step % 5000 == 0 or last_step):
                 checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")

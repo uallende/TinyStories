@@ -123,28 +123,28 @@ class Model(nn.Module):
         self.embedding_table.weight = self.out.weight
 
     def forward(self, x, targets=None):
+        B, T = x.shape  # B is batch size, T is sequence length
         embeds = self.embedding_table(x)
-        positions = self.pos_embedding(torch.arange(self.block_size, device=device))
-        x = embeds + positions
+        positions = self.pos_embedding(torch.arange(T, device=x.device))
+        x = embeds + positions[:T, :]  # Only use positional embeddings up to T
         x = self.decoder(x)
         logits = self.out(x)
 
-        if targets == None:
+        if targets is None:
             loss = None
-
         else:
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
             loss = F.cross_entropy(input=logits, target=targets)
 
-        return logits, loss    
+        return logits, loss 
     
+    @torch.no_grad()
     def generate(self, idx, max_new_tokens, top_k = 30):
+        self.eval()
         # idx is (B, T) array of indices in the current context
         B, T = idx.shape
-        if T < self.block_size:
-          idx = F.pad(idx, (0, self.block_size - T))
 
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.block_size:]
@@ -155,4 +155,5 @@ class Model(nn.Module):
             idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
             idx_next = top_k_indices.gather(-1, idx_next)
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+        self.train()
         return idx[:,T:]
