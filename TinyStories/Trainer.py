@@ -128,66 +128,6 @@ class Trainer:
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff starts at 1 and goes to 0
         return self.min_lr + coeff * (self.max_lr - self.min_lr)
     
-    # def train_model(self):
-    #     writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
-    #     log_dir = "model_checkpoints"
-    #     # writer = SummaryWriter(f'runs/dropout_{self.dropout}_block_size_{self.block_size}self.max_lr{self.self.max_lr}')                
-    #     # optimizer = torch.optim.AdamW(self.m.parameters(), lr=self.self.max_lr)
-
-    #     n_params = sum(p.nelement() for p in self.m.parameters())
-    #     print(f'Number of parameters: {n_params:,}')
-    #     print(f'Tokens per batch: {self.block_size*self.batch_size}')
-    #     optimizer = self.configure_optimizers(weight_decay=0.1, 
-    #                                           learning_rate=6e-4, 
-    #                                           device_type=self.device)
-        
-
-    #     for step in range(self.steps):
-    #         st = time.time()
-    #         last_step = (step == self.steps - 1)
-    #         bst = time.time()
-    #         Xb, Yb = self.make_batches(split='train')  
-    #         bet = time.time()
-    #         bt = (bet - bst) * 1000
-    #         ffw_s = time.time()
-    #         logits, loss = self.m(Xb, Yb) # B, C
-    #         ffw_e = time.time()
-    #         ffw_time = ffw_e - ffw_s          
-    #         writer.add_scalar('Loss/train', loss, step)
-
-    #         optimizer.zero_grad(set_to_none=True)
-    #         loss.backward()
-    #         norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)
-    #         lr = self.get_lr(step)
-    #         for param_group in optimizer.param_groups:
-    #             param_group['lr'] = lr
-    #         optimizer.step()
-    #         et = time.time()
-    #         dt = (et - st) * 1000
-    #         n_tokens = self.batch_size * self.block_size
-    #         print(f"Step: {step+1}. "
-    #                 f"Total time {dt:.3f} ms. " 
-    #                 f"FFWD pass time: {ffw_time*1000:.3f} ms. " 
-    #                 f"Batch load time {bt:.3f} ms. ")
-            
-    #         if step % 50 == 49:
-    #             l = self.estimate_loss()
-    #             writer.add_scalar('Loss/val', l['val'], step)
-    #             print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}. "
-    #                   f"{dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
-                
-
-    #         if step > 0 and (step % 5000 == 0 or last_step):
-    #             checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
-    #             checkpoint = {
-    #                 'model': self.m.state_dict(),
-    #                 'config': self.save_config(),
-    #                 'step': step,
-    #                 'opt': optimizer.state_dict(),
-    #                 'val_loss': l['val']
-    #             }
-    #             torch.save(checkpoint, checkpoint_path)
-
     def train_model(self):
         writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
         log_dir = "model_checkpoints"
@@ -200,23 +140,16 @@ class Trainer:
         grad_accum_steps = 8
         global_step = 0
 
-        for step in range(self.steps//grad_accum_steps):
+        for step in range(self.steps):
             optimizer.zero_grad(set_to_none=True)
             loss_accum = 0.0
             st = time.time()
             last_step = (step == self.steps - 1)
 
             for accum_step in range(grad_accum_steps):
-                stt = time.time()
-                batch_start_time = time.time()
+
                 Xb, Yb = self.make_batches(split='train')            
-                batch_end_time = time.time()
-                
-                # torch.cuda.synchronize()  # Ensure GPU operations are synchronized
-                ffw_s = time.time()
                 _, loss = self.m(Xb, Yb)  # forward pass
-                ffw_e = time.time()
-                ffw_time = ffw_e - ffw_s
                 loss = loss / grad_accum_steps  # scale loss
                 loss_accum += loss.detach().item()  # Accumulate the scaled loss
                 loss.backward()  # backward pass and accumulate gradients
@@ -225,11 +158,6 @@ class Trainer:
                 if global_step % 10 == 0:
                     writer.add_scalar('Loss/train', loss.item(), global_step)
                 global_step += 1  # increment global step for each sub-step
-                ett = time.time()
-                # print(f"Step: {step+1}. Accum step: {accum_step+1}. "
-                #       f"Total time {1000*(ett-stt):.3f} ms. " 
-                #       f"FFWD pass time: {ffw_time*1000:.3f} ms. " 
-                #       f"Batch load time {1000*(batch_end_time-batch_start_time):.3f} ms. ")
 
             norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)  # Clip gradients
             lr = self.get_lr(global_step)  # Get current learning rate
@@ -241,8 +169,9 @@ class Trainer:
             dt = (et - st)
             n_tokens = self.batch_size * self.block_size * grad_accum_steps  # Adjust for accumulated steps
             print(f"step: {step+1}. time {dt*1000:.3f} ms. "
-                  f"{n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. "
-                  f"train loss: {loss_accum:.3f}. norm: {norm:.2f}")
+                  f"{n_tokens/dt:,.0f} tok/sec | train loss: {loss_accum:.3f}. "
+                  f"lr:{lr:.3e}. "
+                  f"norm: {norm:.2f}")
 
             # Evaluation and checkpoint saving
             if step % 100 == 99:
