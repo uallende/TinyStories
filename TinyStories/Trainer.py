@@ -30,9 +30,10 @@ class Trainer:
                        dropout=self.dropout, dff=self.dff, n_layers=self.n_layers,
                        d_model=self.d_model, n_heads=self.n_heads).to(self.device)
         
-        self.m = torch.compile(self.m)
+        # self.m = torch.compile(self.m) not available 1060
                 
     def load_data(self, train, val):
+        print(train, val)
         self.train = self._convert_to_tensor(train)
         self.val = self._convert_to_tensor(val)
 
@@ -45,9 +46,11 @@ class Trainer:
         if isinstance(data, torch.Tensor):
             return data
         elif isinstance(data, str):  # Assume filepath
-            return torch.load(data)
+            return torch.tensor(np.load(data), dtype=torch.long)
         elif isinstance(data, (list, np.ndarray)):
             return torch.tensor(data)
+        elif isinstance(data, (np.ndarray)):
+            return torch.tensor(data)                
         else:
             raise ValueError("Unsupported data type")
 
@@ -126,10 +129,16 @@ class Trainer:
         
 
     #     for step in range(self.steps):
-    #         start_time = time.time()
+    #         st = time.time()
     #         last_step = (step == self.steps - 1)
-    #         Xb, Yb = self.make_batches(split='train')            
+    #         bst = time.time()
+    #         Xb, Yb = self.make_batches(split='train')  
+    #         bet = time.time()
+    #         bt = (bet - bst) * 1000
+    #         ffw_s = time.time()
     #         logits, loss = self.m(Xb, Yb) # B, C
+    #         ffw_e = time.time()
+    #         ffw_time = ffw_e - ffw_s          
     #         writer.add_scalar('Loss/train', loss, step)
 
     #         optimizer.zero_grad(set_to_none=True)
@@ -139,12 +148,15 @@ class Trainer:
     #         for param_group in optimizer.param_groups:
     #             param_group['lr'] = lr
     #         optimizer.step()
-    #         end_time = time.time()
-    #         dt = (end_time - start_time)
+    #         et = time.time()
+    #         dt = (et - st) * 1000
     #         n_tokens = self.batch_size * self.block_size
-    #         print(f"Step: {step+1}. time {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
+    #         print(f"Step: {step+1}. "
+    #                 f"Total time {dt:.3f} ms. " 
+    #                 f"FFWD pass time: {ffw_time*1000:.3f} ms. " 
+    #                 f"Batch load time {bt:.3f} ms. ")
             
-    #         if step % 10 == 9:
+    #         if step % 50 == 49:
     #             l = self.estimate_loss()
     #             writer.add_scalar('Loss/val', l['val'], step)
     #             print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}. "
@@ -186,8 +198,11 @@ class Trainer:
                 Xb, Yb = self.make_batches(split='train')            
                 batch_end_time = time.time()
                 
-                torch.cuda.synchronize()  # Ensure GPU operations are synchronized
+                # torch.cuda.synchronize()  # Ensure GPU operations are synchronized
+                ffw_s = time.time()
                 _, loss = self.m(Xb, Yb)  # forward pass
+                ffw_e = time.time()
+                ffw_time = ffw_e - ffw_s
                 loss = loss / grad_accum_steps  # scale loss
                 loss_accum += loss.detach().item()  # Accumulate the scaled loss
                 loss.backward()  # backward pass and accumulate gradients
@@ -197,7 +212,10 @@ class Trainer:
                     writer.add_scalar('Loss/train', loss.item(), global_step)
                 global_step += 1  # increment global step for each sub-step
                 ett = time.time()
-                print(f"Step: {step+1}. Accumulated step: {accum_step+1}. time {1000*(ett-stt):.3f} ms. Batch load time {1000*(batch_end_time-batch_start_time):.3f} ms. ")
+                # print(f"Step: {step+1}. Accum step: {accum_step+1}. "
+                #       f"Total time {1000*(ett-stt):.3f} ms. " 
+                #       f"FFWD pass time: {ffw_time*1000:.3f} ms. " 
+                #       f"Batch load time {1000*(batch_end_time-batch_start_time):.3f} ms. ")
 
             norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)  # Clip gradients
             lr = self.get_lr(global_step)  # Get current learning rate
@@ -211,7 +229,7 @@ class Trainer:
             print(f"Step: {step+1}. No toks: {n_tokens}. time {dt*1000:.3f} ms. {n_tokens/dt:,.0f} tok/sec | lr:{lr:.3e}. norm: {norm:.2f}")
 
             # Evaluation and checkpoint saving
-            if step % 10 == 9:
+            if step % 500 == 49:
                 l = self.estimate_loss()
                 writer.add_scalar('Loss/val', l['val'], step)
                 print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}")
@@ -227,6 +245,6 @@ class Trainer:
                 }
                 torch.save(checkpoint, checkpoint_path)
 
-# logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
-# logging.debug(f"block_size type: {type(block_size)}, block_size value: {block_size}")
-# logging.info(f"Data type: {type(data)}, Data shape: {data.shape}")
+# # # logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
+# # # logging.debug(f"block_size type: {type(block_size)}, block_size value: {block_size}")
+# # # logging.info(f"Data type: {type(data)}, Data shape: {data.shape}")

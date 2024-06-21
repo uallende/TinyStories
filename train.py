@@ -1,7 +1,7 @@
 import torch
 import os
 import TinyStories.Trainer as ut
-import math
+import numpy as np
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -9,8 +9,8 @@ block_size = 256
 batch_size = 32
 run_count = 0
 batch_size_values = [40]
-n_heads = 8
-n_layers = 8
+n_heads = 6
+n_layers = 6
 d_model = 768
 dropout = 0.1
 eval_iters = 10
@@ -29,8 +29,8 @@ files = os.listdir(data_dir)
 
 total_batches = 0
 for file in files:
-    if file.startswith('tns'):
-        pt_file = torch.load(f'{data_dir}/{file}')
+    if file.endswith('npy'):
+        pt_file = np.load(f'{data_dir}/{file}')
         n_batches = calculate_total_batches(data=pt_file, 
                                             block_size=block_size, 
                                             batch_size=batch_size)
@@ -44,7 +44,7 @@ trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropo
                      device=device, learning_rate=max_lr, 
                      batch_size=batch_size, steps=steps, eval_iters=eval_iters)
 for file in files:
-    if file.startswith('tns'):
-        trainer.load_data(f'{data_dir}/{file}', 'data/tokenized_inputs/val.pt')
+    if file.endswith('npy'):
+        trainer.load_data(f'{data_dir}/{file}', f'{data_dir}/tinystories_valid_000000.npy')
         x, y = trainer.make_batches(split='train')
         trainer.train_model()
