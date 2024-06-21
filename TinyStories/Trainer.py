@@ -140,7 +140,7 @@ class Trainer:
         grad_accum_steps = 8
         global_step = 0
 
-        for step in range(self.steps):
+        for step in range(self.steps//grad_accum_steps):
             optimizer.zero_grad(set_to_none=True)
             loss_accum = 0.0
             st = time.time()
@@ -179,7 +179,7 @@ class Trainer:
                 writer.add_scalar('Loss/val', l['val'], step)
                 print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}")
 
-                generated_idx = self.m.generate(self.gen_toks, max_new_tokens=30)
+                generated_idx = self.m.generate(self.gen_toks, max_new_tokens=225)
                 generated_text = self.tkrz.decode(generated_idx[0].tolist())
                 print(f"Generated text: {self.gen_starting_text} {generated_text}")
 

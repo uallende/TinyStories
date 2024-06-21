@@ -26,7 +26,7 @@ n_layers = 6
 d_model = 768
 dropout = 0.1
 eval_iters = 10
-max_lr = 6e-4
+max_lr = 6e-3
 min_lr = max_lr * 0.1
 warmup_steps = 150
 max_steps = 57876 # 57876 steps is 1 epoch, if data is 10B tokens and batch size 0.5M tokens
@@ -54,7 +54,7 @@ steps = total_batches
 trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
                      n_layers=n_layers, d_model=d_model, n_heads=n_heads,
                      device=device, learning_rate=max_lr, 
-                     batch_size=batch_size, steps=150, eval_iters=eval_iters)
+                     batch_size=batch_size, steps=max_steps, eval_iters=eval_iters)
 for file in files:
     if file.endswith('npy'):
         trainer.load_data(f'{data_dir}/{file}', f'{data_dir}/tinystories_valid_000000.npy')
