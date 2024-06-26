@@ -41,20 +41,23 @@ files = os.listdir(data_dir)
 
 total_batches = 0
 for file in files:
-    if file.endswith('npy'):
+    if file.startswith('tiny_stories_train_'):
         pt_file = np.load(f'{data_dir}/{file}')
         n_batches = calculate_total_batches(data=pt_file, 
                                             block_size=block_size, 
                                             batch_size=batch_size)
         total_batches += n_batches
 
-print(f'Total batches: {total_batches:,}')
+print(f'Total number of batches in all shards: {total_batches:,}')
 steps = total_batches
 
 trainer = ut.Trainer(vocab_size=vocab_size, block_size=block_size, dropout=dropout, 
                      n_layers=n_layers, d_model=d_model, n_heads=n_heads,
                      device=device, learning_rate=max_lr, 
                      batch_size=batch_size, steps=max_steps, eval_iters=eval_iters)
+
+trainer.train_model()
+exit(0)
 for file in files:
     if file.endswith('npy'):
         trainer.load_data(f'{data_dir}/{file}', f'{data_dir}/tinystories_valid_000000.npy')

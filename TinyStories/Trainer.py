@@ -57,16 +57,19 @@ class Trainer:
         return config_dict
 
     def _convert_to_tensor(self, data):
+        print(f'data in format {type(data)}')
         if isinstance(data, torch.Tensor):
-            return data
+            return data.long()  # Ensure tensor is of Long type
         elif isinstance(data, str):  # Assume filepath
-            return torch.tensor(np.load(data), dtype=torch.long)
+            data = np.load(data)  # Load the data
+            if data.dtype == np.uint16:
+                data = data.astype(np.int16)  # Convert from uint16 to int16
+            return torch.tensor(data, dtype=torch.long)  # Explicitly use Long type
         elif isinstance(data, (list, np.ndarray)):
-            return torch.tensor(data)
-        elif isinstance(data, (np.ndarray)):
-            return torch.tensor(data)                
-        else:
-            raise ValueError("Unsupported data type")
+            print(f'Data in format ndarray {data.dtype}') 
+            if data.dtype == np.uint16:
+                data = data.astype(np.int16)  # Convert from uint16 to int16
+            return torch.tensor(data).long()  # Convert to tensor and ensure Long type
 
     def make_batches(self, split=None):
         data = self.train if split == 'train' else self.val
@@ -129,9 +132,14 @@ class Trainer:
         return self.min_lr + coeff * (self.max_lr - self.min_lr)
     
     def train_model(self):
+
+        def calculate_total_batches(data, block_size, batch_size):
+            return len(data) // (block_size * batch_size)
+        
         writer = SummaryWriter(f'runs/heads_{self.n_heads}_layers_{self.n_layers}_dmodel_{self.d_model}_batch_size_{self.batch_size}')
         log_dir = "model_checkpoints"
-        
+        data_dir = 'data/tokenized_inputs'
+        os.makedirs(log_dir, exist_ok=True)
         n_params = sum(p.nelement() for p in self.m.parameters())
         print(f'Number of parameters: {n_params:,}')
         print(f'Tokens per batch: {self.block_size*self.batch_size}')
@@ -139,60 +147,77 @@ class Trainer:
         
         grad_accum_steps = 8
         global_step = 0
+        total_batches = 0
+        val = np.load(f'{data_dir}/tinystories_valid_000000.npy')
 
-        for step in range(self.steps//grad_accum_steps):
-            optimizer.zero_grad(set_to_none=True)
-            loss_accum = 0.0
-            st = time.time()
-            last_step = (step == self.steps - 1)
+        # load all file names from data
+        files = os.listdir(data_dir)
+        for file in files:
+            if file.endswith('npy'):
+                train = np.load(f'{data_dir}/{file}')
 
-            for accum_step in range(grad_accum_steps):
-
-                Xb, Yb = self.make_batches(split='train')            
-                _, loss = self.m(Xb, Yb)  # forward pass
-                loss = loss / grad_accum_steps  # scale loss
-                loss_accum += loss.detach().item()  # Accumulate the scaled loss
-                loss.backward()  # backward pass and accumulate gradients
+                n_batches_per_file = calculate_total_batches(data=train, 
+                                                    block_size=self.block_size, 
+                                                    batch_size=self.batch_size)
                 
-                # Log less frequently
-                if global_step % 10 == 0:
-                    writer.add_scalar('Loss/train', loss.item(), global_step)
-                global_step += 1  # increment global step for each sub-step
+                print(f'Shard: {file}. Batches: {n_batches_per_file}')
+                self.load_data(train, val)
+                print(self.train.shape, self.val.shape)
+                print(type(self.train), type(self.val))
 
-            norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)  # Clip gradients
-            lr = self.get_lr(global_step)  # Get current learning rate
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr  # Update learning rate
-            optimizer.step()  # Apply accumulated gradients
+            for step in range(n_batches_per_file//grad_accum_steps):
+                optimizer.zero_grad(set_to_none=True)
+                loss_accum = 0.0
+                st = time.time()
+                last_step = (step == self.steps - 1)
 
-            et = time.time()
-            dt = (et - st)
-            n_tokens = self.batch_size * self.block_size * grad_accum_steps  # Adjust for accumulated steps
-            print(f"step: {step+1}. time {dt*1000:.3f} ms. "
-                  f"{n_tokens/dt:,.0f} tok/sec | train loss: {loss_accum:.3f}. "
-                  f"lr:{lr:.3e}. "
-                  f"norm: {norm:.2f}")
+                for accum_step in range(grad_accum_steps):
 
-            # Evaluation and checkpoint saving
-            if step % 100 == 99:
-                l = self.estimate_loss()
-                writer.add_scalar('Loss/val', l['val'], step)
-                print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}")
+                    Xb, Yb = self.make_batches(split='train')            
+                    _, loss = self.m(Xb, Yb)  # forward pass
+                    loss = loss / grad_accum_steps  # scale loss
+                    loss_accum += loss.detach().item()  # Accumulate the scaled loss
+                    loss.backward()  # backward pass and accumulate gradients
+                    
+                    # Log less frequently
+                    if global_step % 10 == 0:
+                        writer.add_scalar('Loss/train', loss.item(), global_step)
+                    global_step += 1  # increment global step for each sub-step
 
-                generated_idx = self.m.generate(self.gen_toks, max_new_tokens=225)
-                generated_text = self.tkrz.decode(generated_idx[0].tolist())
-                print(f"Generated text: {self.gen_starting_text} {generated_text}")
+                norm = torch.nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)  # Clip gradients
+                lr = self.get_lr(global_step)  # Get current learning rate
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr  # Update learning rate
+                optimizer.step()  # Apply accumulated gradients
 
-            if step > 0 and (step % 5000 == 0 or last_step):
-                checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
-                checkpoint = {
-                    'model': self.m.state_dict(),
-                    'config': self.save_config(),
-                    'step': step,
-                    'opt': optimizer.state_dict(),
-                    'val_loss': l['val']
-                }
-                torch.save(checkpoint, checkpoint_path)
+                et = time.time()
+                dt = (et - st)
+                n_tokens = self.batch_size * self.block_size * grad_accum_steps  # Adjust for accumulated steps
+                print(f"step: {step+1}. time {dt*1000:.3f} ms. "
+                    f"{n_tokens/dt:,.0f} tok/sec | train loss: {loss_accum:.3f}. "
+                    f"lr:{lr:.3e}. "
+                    f"norm: {norm:.2f}")
+
+                # Evaluation and checkpoint saving
+                if step % 100 == 99:
+                    l = self.estimate_loss()
+                    writer.add_scalar('Loss/val', l['val'], step)
+                    print(f"Step: {step+1}. val loss: {l['val']:.3f}. train loss: {l['train']:.3f}")
+
+                    generated_idx = self.m.generate(self.gen_toks, max_new_tokens=225)
+                    generated_text = self.tkrz.decode(generated_idx[0].tolist())
+                    print(f"Generated text: {self.gen_starting_text} {generated_text}")
+
+                if step > 0 and (step % 5000 == 0 or last_step):
+                    checkpoint_path = os.path.join(log_dir, f"model_{step:05d}.pt")
+                    checkpoint = {
+                        'model': self.m.state_dict(),
+                        'config': self.save_config(),
+                        'step': step,
+                        'opt': optimizer.state_dict(),
+                        'val_loss': l['val']
+                    }
+                    torch.save(checkpoint, checkpoint_path)
 
 # # # logging.basicConfig(level=logging.DEBUG, filename='app.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s')
 # # # logging.debug(f"block_size type: {type(block_size)}, block_size value: {block_size}")
